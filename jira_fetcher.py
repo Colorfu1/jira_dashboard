@@ -67,9 +67,13 @@ def _get_parent_cards(issuelinks):
 def _get_at_comments(comments_data, username=None):
     username = username or USERNAME
     results = []
+    has_replied = False
     comments = comments_data.get("comments", []) if comments_data else []
     for c in comments:
         body = c.get("body", "")
+        author_name = c.get("author", {}).get("name", "")
+        if author_name == username:
+            has_replied = True
         if username in body:
             author = c.get("author", {}).get("displayName", "")
             created = c.get("created", "")[:10]
@@ -77,7 +81,7 @@ def _get_at_comments(comments_data, username=None):
             clean_body = re.sub(r"!\S+\|[^!]*!", "[图片]", clean_body)
             clean_body = clean_body.strip()
             results.append(f"[{created} {author}] {clean_body}")
-    return "\n---\n".join(results) if results else ""
+    return ("\n---\n".join(results) if results else "", has_replied)
 
 
 def fetch_all_issues():
@@ -150,6 +154,7 @@ def fetch_all_issues():
         other_cards = [
             f"{ck}: {cs}" for ck, cs in parent_cards if ck not in card_keys_set
         ]
+        at_comments, has_replied = _get_at_comments(f.get("comment", {}))
 
         rows.append(
             {
@@ -166,7 +171,8 @@ def fetch_all_issues():
                 "test_date": test_date,
                 "card_membership": list(card_membership),
                 "other_cards": "; ".join(other_cards),
-                "at_comments": _get_at_comments(f.get("comment", {})),
+                "at_comments": at_comments,
+                "diagnosed": has_replied,
             }
         )
 

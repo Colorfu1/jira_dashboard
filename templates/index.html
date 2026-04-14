@@ -50,7 +50,11 @@
         /* DataTable overrides */
         table.dataTable { font-size: 12px; white-space: nowrap; }
         table.dataTable thead th { background: #4472C4; color: #fff; font-size: 11px; padding: 8px 6px; }
-        table.dataTable thead th.card-col { background: #5B9BD5; font-size: 10px; writing-mode: vertical-lr; text-orientation: mixed; transform: rotate(180deg); padding: 8px 2px; width: 30px; min-width: 30px; }
+        table.dataTable thead th.card-col { background: #5B9BD5; font-size: 10px; writing-mode: vertical-lr; text-orientation: mixed; transform: rotate(180deg); padding: 8px 2px; width: 30px; min-width: 30px; cursor: help; }
+        /* Global floating tooltip for card headers */
+        #cardHeaderTooltip { display: none; position: fixed; background: #2c3e50; color: #fff; padding: 10px 14px; border-radius: 4px; font-size: 12px; white-space: normal; width: 320px; z-index: 300; box-shadow: 0 4px 12px rgba(0,0,0,0.3); text-align: left; line-height: 1.5; pointer-events: none; }
+        #cardHeaderTooltip .card-id { color: #3498db; font-weight: 600; font-size: 13px; }
+        #cardHeaderTooltip .card-count { color: #95a5a6; font-size: 11px; }
         table.dataTable tbody td { padding: 6px 8px; vertical-align: top; }
         table.dataTable tbody td.card-col-data { width: 30px; min-width: 30px; text-align: center; }
         table.dataTable tbody td.summary-cell { white-space: normal; max-width: 300px; }
@@ -63,6 +67,8 @@
 
         a.jira-link { color: #0563C1; text-decoration: none; font-weight: 500; }
         a.jira-link:hover { text-decoration: underline; }
+        a.jira-link.diagnosed { background: #27ae60; color: #fff; padding: 2px 6px; border-radius: 3px; }
+        a.jira-link.diagnosed:hover { background: #219a52; color: #fff; }
 
         /* Platform badges */
         .platform-badge { padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; }
@@ -111,6 +117,7 @@
 <div class="content" id="contentArea"></div>
 
 <div class="loading-overlay" id="loadingOverlay">Loading data from Jira...</div>
+<div id="cardHeaderTooltip"></div>
 <div class="sticky-scrollbar" id="stickyScrollbar"><div class="sticky-scrollbar-inner" id="stickyScrollbarInner"></div></div>
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
@@ -191,7 +198,11 @@ function initTable(tableId, rows) {
 
     const columns = [
         { title: 'Jira Key', data: 'key', width: '120px',
-          render: (d, t, row) => t === 'display' ? `<a class="jira-link" href="${row.url}" target="_blank">${d}</a>` : d },
+          render: (d, t, row) => {
+            if (t !== 'display') return d;
+            const cls = row.diagnosed ? 'jira-link diagnosed' : 'jira-link';
+            return `<a class="${cls}" href="${row.url}" target="_blank">${d}</a>`;
+          }},
         { title: '标题', data: 'summary', className: 'summary-cell', width: '280px',
           render: (d) => `<div class="summary-text">${escHtml(d)}</div>` },
         { title: '状态', data: 'status', width: '80px',
@@ -230,7 +241,7 @@ function initTable(tableId, rows) {
     for (const col of columns) {
         const isCard = cardCols.find(c => c.key === col.title);
         if (isCard) {
-            headerHtml += `<th class="card-col" title="${escHtml(isCard.key+': '+isCard.summary)} (${isCard.count})">${isCard.key}</th>`;
+            headerHtml += `<th class="card-col" data-card-key="${escHtml(isCard.key)}" data-card-summary="${escHtml(isCard.summary)}" data-card-count="${isCard.count}">${isCard.key}</th>`;
         } else {
             headerHtml += `<th>${col.title}</th>`;
         }
@@ -282,6 +293,22 @@ function escHtml(s) {
 }
 
 loadData();
+
+// Card header tooltip via event delegation
+$(document).on('mouseenter', 'th.card-col[data-card-key]', function (e) {
+    const el = $(this);
+    const tip = $('#cardHeaderTooltip');
+    tip.html(
+        `<span class="card-id">${el.data('card-key')}</span><br>` +
+        `${el.data('card-summary')}<br>` +
+        `<span class="card-count">共关联 ${el.data('card-count')} 个 issue</span>`
+    );
+    tip.css({ display: 'block', left: e.pageX + 10, top: e.pageY + 10 });
+}).on('mousemove', 'th.card-col[data-card-key]', function (e) {
+    $('#cardHeaderTooltip').css({ left: e.clientX + 10, top: e.clientY + 10 });
+}).on('mouseleave', 'th.card-col[data-card-key]', function () {
+    $('#cardHeaderTooltip').css('display', 'none');
+});
 
 // Sync sticky bottom scrollbar with table scroll container
 function setupStickyScrollbar() {
