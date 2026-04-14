@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jira Issue Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f6fa; color: #333; }
+
+        .header { background: #2c3e50; color: #fff; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+        .header h1 { font-size: 18px; font-weight: 600; }
+        .header-right { display: flex; align-items: center; gap: 16px; font-size: 13px; }
+        .header-right .stats { opacity: 0.8; }
+        #refreshBtn { background: #3498db; color: #fff; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-size: 13px; transition: background 0.2s; }
+        #refreshBtn:hover { background: #2980b9; }
+        #refreshBtn:disabled { background: #7f8c8d; cursor: not-allowed; }
+        #refreshBtn.loading { animation: pulse 1s infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+        .tabs-container { background: #fff; border-bottom: 1px solid #ddd; padding: 0 24px; overflow-x: auto; white-space: nowrap; position: sticky; top: 54px; z-index: 99; }
+        .tab { display: inline-block; padding: 10px 16px; cursor: pointer; font-size: 13px; color: #666; border-bottom: 3px solid transparent; transition: all 0.2s; }
+        .tab:hover { color: #2c3e50; background: #f8f9fa; }
+        .tab.active { color: #2c3e50; border-bottom-color: #3498db; font-weight: 600; }
+        .tab .badge { background: #e0e0e0; color: #555; padding: 1px 6px; border-radius: 10px; font-size: 11px; margin-left: 4px; }
+        .tab.active .badge { background: #3498db; color: #fff; }
+
+        .content { padding: 16px 24px; }
+        .table-wrapper { display: none; background: #fff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 16px; }
+        .table-wrapper.active { display: block; }
+
+        /* Use a single native scrollable container instead of DataTables scrollX */
+        .scroll-container { overflow-x: auto; width: 100%; }
+        /* Custom scrollbar styling */
+        .scroll-container::-webkit-scrollbar { height: 12px; }
+        .scroll-container::-webkit-scrollbar-track { background: #f0f0f0; border-radius: 6px; }
+        .scroll-container::-webkit-scrollbar-thumb { background: #3498db; border-radius: 6px; border: 2px solid #f0f0f0; }
+        .scroll-container::-webkit-scrollbar-thumb:hover { background: #2980b9; }
+        .scroll-container { scrollbar-width: thin; scrollbar-color: #3498db #f0f0f0; }
+
+        /* Fixed horizontal scrollbar at viewport bottom */
+        .sticky-scrollbar { position: fixed; bottom: 0; left: 0; right: 0; height: 16px; overflow-x: auto; overflow-y: hidden; z-index: 98; background: #e8e8e8; }
+        .sticky-scrollbar-inner { height: 1px; }
+        .sticky-scrollbar::-webkit-scrollbar { height: 14px; }
+        .sticky-scrollbar::-webkit-scrollbar-track { background: #e8e8e8; }
+        .sticky-scrollbar::-webkit-scrollbar-thumb { background: #3498db; border-radius: 7px; border: 2px solid #e8e8e8; }
+        .sticky-scrollbar::-webkit-scrollbar-thumb:hover { background: #2980b9; }
+
+        /* DataTable overrides */
+        table.dataTable { font-size: 12px; white-space: nowrap; }
+        table.dataTable thead th { background: #4472C4; color: #fff; font-size: 11px; padding: 8px 6px; }
+        table.dataTable thead th.card-col { background: #5B9BD5; font-size: 10px; writing-mode: vertical-lr; text-orientation: mixed; transform: rotate(180deg); padding: 8px 2px; width: 30px; min-width: 30px; }
+        table.dataTable tbody td { padding: 6px 8px; vertical-align: top; }
+        table.dataTable tbody td.card-col-data { width: 30px; min-width: 30px; text-align: center; }
+        table.dataTable tbody td.summary-cell { white-space: normal; max-width: 300px; }
+        .summary-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; max-width: 280px; cursor: default; }
+        .summary-text:hover { -webkit-line-clamp: unset; overflow: visible; background: #ffffdd; position: relative; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,0.15); padding: 4px; border-radius: 3px; }
+        .comment-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; max-width: 280px; cursor: default; font-size: 11px; color: #555; }
+        .comment-text:hover { -webkit-line-clamp: unset; overflow: visible; background: #eef6ff; position: relative; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,0.15); padding: 4px; border-radius: 3px; }
+        table.dataTable tbody td.comment-cell { white-space: normal; max-width: 350px; font-size: 11px; color: #555; }
+        table.dataTable tbody tr:hover { background: #f0f7ff !important; }
+
+        a.jira-link { color: #0563C1; text-decoration: none; font-weight: 500; }
+        a.jira-link:hover { text-decoration: underline; }
+
+        /* Platform badges */
+        .platform-badge { padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; }
+        .platform-badge.add6 { background: #ffeaa7; color: #d35400; }
+        .platform-badge.x86 { background: #dfe6e9; color: #2d3436; }
+
+        /* Priority colors */
+        .priority-P0 { color: #e74c3c; font-weight: bold; }
+        .priority-P1 { color: #e74c3c; }
+        .priority-P1\.5 { color: #e67e22; }
+        .priority-P2 { color: #f39c12; }
+        .priority-P3 { color: #95a5a6; }
+
+        /* Status badges */
+        .status-badge { padding: 2px 6px; border-radius: 3px; font-size: 11px; }
+        .status-TRIAGE { background: #fadbd8; color: #c0392b; }
+        .status-分析完成 { background: #d5f5e3; color: #27ae60; }
+        .status-IN_PROGRESS { background: #d6eaf8; color: #2980b9; }
+
+        .loading-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.8); display: flex; align-items: center; justify-content: center; z-index: 1000; font-size: 18px; color: #2c3e50; }
+        .loading-overlay.hidden { display: none; }
+
+        th[title] { cursor: help; }
+
+        /* Card check tooltip */
+        .check-mark { color: #27ae60; font-weight: bold; cursor: help; position: relative; font-size: 18px; }
+        .card-tooltip { display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: #2c3e50; color: #fff; padding: 8px 12px; border-radius: 4px; font-size: 11px; font-weight: normal; white-space: normal; width: 280px; z-index: 200; box-shadow: 0 2px 8px rgba(0,0,0,0.3); text-align: left; line-height: 1.4; }
+        .card-tooltip::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 6px solid transparent; border-top-color: #2c3e50; }
+        .check-mark:hover .card-tooltip { display: block; }
+        .card-tooltip .card-id { color: #3498db; font-weight: 600; }
+        .card-tooltip .card-count { color: #95a5a6; font-size: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>Jira Issue Dashboard</h1>
+    <div class="header-right">
+        <span class="stats" id="statsInfo">Loading...</span>
+        <button id="refreshBtn" onclick="refreshData()">Refresh</button>
+    </div>
+</div>
+
+<div class="tabs-container" id="tabsContainer"></div>
+
+<div class="content" id="contentArea"></div>
+
+<div class="loading-overlay" id="loadingOverlay">Loading data from Jira...</div>
+<div class="sticky-scrollbar" id="stickyScrollbar"><div class="sticky-scrollbar-inner" id="stickyScrollbarInner"></div></div>
+
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+<script>
+let cachedData = null;
+let activeTables = {};
+let cardLookup = {};  // key -> {summary, count}
+
+function refreshData() {
+    const btn = document.getElementById('refreshBtn');
+    btn.disabled = true;
+    btn.textContent = 'Refreshing...';
+    btn.classList.add('loading');
+    fetch('/api/refresh', { method: 'POST' }).then(r => r.json()).then(() => pollStatus());
+}
+
+function pollStatus() {
+    fetch('/api/status').then(r => r.json()).then(data => {
+        if (data.loading) { setTimeout(pollStatus, 2000); return; }
+        const btn = document.getElementById('refreshBtn');
+        btn.disabled = false; btn.textContent = 'Refresh'; btn.classList.remove('loading');
+        loadData();
+    });
+}
+
+function loadData() {
+    fetch('/api/data').then(r => {
+        if (!r.ok) throw new Error('Data not ready');
+        return r.json();
+    }).then(resp => {
+        cachedData = resp.data;
+        // Build card lookup
+        cardLookup = {};
+        for (const c of cachedData.card_columns) {
+            cardLookup[c.key] = { summary: c.summary, count: c.count };
+        }
+        document.getElementById('statsInfo').textContent =
+            `${cachedData.total} issues | Updated: ${resp.last_updated}`;
+        document.getElementById('loadingOverlay').classList.add('hidden');
+        renderTabs();
+        switchTab('汇总');
+    }).catch(() => setTimeout(loadData, 2000));
+}
+
+function renderTabs() {
+    const container = document.getElementById('tabsContainer');
+    let html = `<span class="tab active" data-tab="汇总" onclick="switchTab('汇总')">汇总 <span class="badge">${cachedData.total}</span></span>`;
+    for (const d of cachedData.dates) {
+        const count = cachedData.date_groups[d].length;
+        html += `<span class="tab" data-tab="${d}" onclick="switchTab('${d}')">${d} <span class="badge">${count}</span></span>`;
+    }
+    container.innerHTML = html;
+}
+
+function switchTab(tabName) {
+    document.querySelectorAll('.tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.tab === tabName);
+    });
+    for (const [id, dt] of Object.entries(activeTables)) { dt.destroy(); }
+    activeTables = {};
+
+    const rows = tabName === '汇总' ? cachedData.rows : (cachedData.date_groups[tabName] || []);
+    const tableId = 'table_' + tabName.replace(/[^a-zA-Z0-9]/g, '_');
+
+    const contentArea = document.getElementById('contentArea');
+    contentArea.innerHTML = `<div class="table-wrapper active" id="wrap_${tableId}">
+        <div class="scroll-container">
+            <table id="${tableId}" class="display compact"></table>
+        </div>
+    </div>`;
+
+    initTable(tableId, rows);
+}
+
+function initTable(tableId, rows) {
+    const cardCols = cachedData.card_columns;
+
+    const columns = [
+        { title: 'Jira Key', data: 'key', width: '120px',
+          render: (d, t, row) => t === 'display' ? `<a class="jira-link" href="${row.url}" target="_blank">${d}</a>` : d },
+        { title: '标题', data: 'summary', className: 'summary-cell', width: '280px',
+          render: (d) => `<div class="summary-text">${escHtml(d)}</div>` },
+        { title: '状态', data: 'status', width: '80px',
+          render: (d) => `<span class="status-badge status-${d.replace(/\s+/g,'_')}">${d}</span>` },
+        { title: '优先级', data: 'priority', width: '50px',
+          render: (d) => `<span class="priority-${d}">${d}</span>` },
+        { title: '测试时间', data: 'test_time', width: '140px' },
+        { title: '平台', data: 'platform', width: '50px',
+          render: (d) => d !== '未知' ? `<span class="platform-badge ${d}">${d}</span>` : d },
+        { title: '车次', data: 'vehicle_id', width: '100px' },
+        { title: '@我的评论', data: 'at_comments', className: 'comment-cell', width: '280px',
+          render: (d) => d ? `<div class="comment-text">${escHtml(d)}</div>` : '' },
+    ];
+
+    // Card columns with tooltip on checkmark
+    for (const card of cardCols) {
+        columns.push({
+            title: card.key,
+            data: null,
+            className: 'card-col-data',
+            width: '30px',
+            render: (d, t, row) => {
+                if (!row.card_membership.includes(card.key)) return '';
+                const info = cardLookup[card.key] || {};
+                return `<span class="check-mark">✓<span class="card-tooltip"><span class="card-id">${escHtml(card.key)}</span><br>${escHtml(info.summary || '')}<br><span class="card-count">共关联 ${info.count || 0} 个 issue</span></span></span>`;
+            },
+            orderable: false,
+        });
+    }
+
+    columns.push({ title: '其他关联卡', data: 'other_cards', width: '200px',
+        render: (d) => d ? `<span title="${escHtml(d)}">${d.length>40 ? d.slice(0,40)+'...' : d}</span>` : '' });
+
+    // Build thead
+    let headerHtml = '<thead><tr>';
+    for (const col of columns) {
+        const isCard = cardCols.find(c => c.key === col.title);
+        if (isCard) {
+            headerHtml += `<th class="card-col" title="${escHtml(isCard.key+': '+isCard.summary)} (${isCard.count})">${isCard.key}</th>`;
+        } else {
+            headerHtml += `<th>${col.title}</th>`;
+        }
+    }
+    headerHtml += '</tr></thead>';
+    $(`#${tableId}`).append(headerHtml);
+
+    // Filter bar
+    const filterDiv = $(`<div style="margin-bottom:10px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:12px;"></div>`);
+    const filterDefs = [{idx:2,label:'状态'},{idx:3,label:'优先级'},{idx:5,label:'平台'},{idx:6,label:'车次'}];
+    $(`#wrap_${tableId}`).prepend(filterDiv);
+
+    const dt = $(`#${tableId}`).DataTable({
+        data: rows,
+        columns: columns,
+        pageLength: 50,
+        order: [[4, 'desc']],
+        language: {
+            search: '搜索:', lengthMenu: '每页 _MENU_ 条',
+            info: '显示 _START_ - _END_ / 共 _TOTAL_ 条',
+            paginate: { first: '首页', last: '末页', next: '下一页', previous: '上一页' },
+            zeroRecords: '无匹配记录',
+        },
+        initComplete: function () {
+            const api = this.api();
+            for (const def of filterDefs) {
+                const column = api.column(def.idx);
+                const select = $(`<label style="font-weight:600">${def.label}: <select style="font-size:12px;padding:2px 4px"><option value="">全部</option></select></label>`);
+                const sel = select.find('select');
+                sel.on('change', function () {
+                    const val = $.fn.dataTable.util.escapeRegex($(this).val());
+                    column.search(val ? '^'+val+'$' : '', true, false).draw();
+                });
+                column.data().unique().sort().each(function (d) {
+                    const text = $('<div>').html(d).text();
+                    if (text) sel.append(`<option value="${escHtml(text)}">${text}</option>`);
+                });
+                filterDiv.append(select);
+            }
+        }
+    });
+
+    activeTables[tableId] = dt;
+}
+
+function escHtml(s) {
+    if (!s) return '';
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+loadData();
+
+// Sync sticky bottom scrollbar with table scroll container
+function setupStickyScrollbar() {
+    const scrollContainer = document.querySelector('.scroll-container');
+    const stickyBar = document.getElementById('stickyScrollbar');
+    const stickyInner = document.getElementById('stickyScrollbarInner');
+    if (!scrollContainer || !stickyBar) return;
+
+    // Match inner width to table width
+    const table = scrollContainer.querySelector('table');
+    if (table) {
+        stickyInner.style.width = table.scrollWidth + 'px';
+    }
+
+    let syncing = false;
+    scrollContainer.addEventListener('scroll', function () {
+        if (syncing) return;
+        syncing = true;
+        stickyBar.scrollLeft = scrollContainer.scrollLeft;
+        syncing = false;
+    });
+    stickyBar.addEventListener('scroll', function () {
+        if (syncing) return;
+        syncing = true;
+        scrollContainer.scrollLeft = stickyBar.scrollLeft;
+        syncing = false;
+    });
+}
+
+// Re-setup after each tab switch
+const origSwitchTab = switchTab;
+switchTab = function(tabName) {
+    origSwitchTab(tabName);
+    setTimeout(setupStickyScrollbar, 200);
+};
+</script>
+</body>
+</html>
