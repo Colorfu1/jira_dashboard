@@ -14,7 +14,7 @@ ADD6_PREFIXES = {"mol-m", "ml3-vp"}
 CARD_MIN_COUNT = 1  # show all linked cards as columns
 
 JQL = (
-    f'assignee="{USERNAME}" AND status NOT IN '
+    f'(assignee="{USERNAME}" OR comment ~ "{USERNAME}") AND status NOT IN '
     '("关闭归档","已关闭","Closed","Done","Resolved") '
     'ORDER BY updated DESC'
 )

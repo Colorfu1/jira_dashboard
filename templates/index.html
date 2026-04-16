@@ -126,6 +126,7 @@
 let cachedData = null;
 let activeTables = {};
 let cardLookup = {};  // key -> {summary, count}
+let currentTab = '汇总';
 
 function refreshData() {
     const btn = document.getElementById('refreshBtn');
@@ -159,7 +160,9 @@ function loadData() {
             `${cachedData.total} issues | Updated: ${resp.last_updated}`;
         document.getElementById('loadingOverlay').classList.add('hidden');
         renderTabs();
-        switchTab('汇总');
+        // Stay on current tab if it still exists, otherwise fall back to 汇总
+        const tabExists = currentTab === '汇总' || cachedData.dates.includes(currentTab);
+        switchTab(tabExists ? currentTab : '汇总');
     }).catch(() => setTimeout(loadData, 2000));
 }
 
@@ -174,6 +177,7 @@ function renderTabs() {
 }
 
 function switchTab(tabName) {
+    currentTab = tabName;
     document.querySelectorAll('.tab').forEach(t => {
         t.classList.toggle('active', t.dataset.tab === tabName);
     });
