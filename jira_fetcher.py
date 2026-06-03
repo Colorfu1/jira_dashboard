@@ -1,16 +1,20 @@
-import os
 import re
 import json
 import requests
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
-JIRA_BASE_URL = os.getenv("JIRA_BASE_URL", "https://your-jira.example.com").rstrip("/")
+from config import (
+    API_KEY,
+    CACHE_PATH,
+    INCREMENTAL_LOOKBACK_MINUTES,
+    JIRA_BASE_URL,
+    USERNAME,
+    validate as validate_config,
+)
+
 JIRA_API_URL = f"{JIRA_BASE_URL}/rest/api/2"
 JIRA_BROWSE_URL = f"{JIRA_BASE_URL}/browse"
-USERNAME = os.getenv("JIRA_USERNAME", "")
-API_KEY = os.getenv("JIRA_API_TOKEN", "")
 HEADERS = {"Authorization": f"Bearer {API_KEY}"}
 SESSION = requests.Session()
 # Internal Jira is reachable directly from this environment. Avoid routing
@@ -20,8 +24,6 @@ SESSION.trust_env = False
 
 ADD6_PREFIXES = {"mol-m", "ml3-vp"}
 CARD_MIN_COUNT = 1  # show all linked cards as columns
-CACHE_PATH = Path(os.getenv("JIRA_DASHBOARD_CACHE", Path(__file__).with_name("jira_cache.json")))
-INCREMENTAL_LOOKBACK_MINUTES = int(os.getenv("JIRA_INCREMENTAL_LOOKBACK_MINUTES", "30"))
 OPEN_STATUSES_EXCLUDED = {"关闭归档", "已关闭", "Closed", "Done", "Resolved"}
 
 BASE_JQL = f'(assignee="{USERNAME}" OR comment ~ "{USERNAME}")'
@@ -103,17 +105,6 @@ def _get_at_comments(comments_data, username=None):
         latest_mention_at,
         latest_my_reply_at,
     )
-
-
-def _validate_config():
-    if not USERNAME:
-        raise RuntimeError(
-            "Missing JIRA_USERNAME. Set JIRA_USERNAME before starting the app."
-        )
-    if not API_KEY:
-        raise RuntimeError(
-            "Missing JIRA_API_TOKEN. Set JIRA_API_TOKEN before starting the app."
-        )
 
 
 def _parse_jira_datetime(value):
@@ -231,7 +222,7 @@ def _sync_cache(mode):
         cache["last_changed_count"] = 0
         return cache
 
-    _validate_config()
+    validate_config()
     full_sync = mode == "full" or not cache.get("issues")
     if full_sync:
         jql = OPEN_JQL
