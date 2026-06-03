@@ -13,10 +13,15 @@
         .header h1 { font-size: 18px; font-weight: 600; }
         .header-right { display: flex; align-items: center; gap: 16px; font-size: 13px; }
         .header-right .stats { opacity: 0.8; }
-        #refreshBtn { background: #3498db; color: #fff; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-size: 13px; transition: background 0.2s; }
+        .toolbar-btn { color: #fff; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; transition: background 0.2s; }
+        .toolbar-btn:disabled { background: #7f8c8d !important; cursor: not-allowed; }
+        .toolbar-btn.loading { animation: pulse 1s infinite; }
+        #refreshBtn { background: #3498db; }
         #refreshBtn:hover { background: #2980b9; }
-        #refreshBtn:disabled { background: #7f8c8d; cursor: not-allowed; }
-        #refreshBtn.loading { animation: pulse 1s infinite; }
+        #fullRefreshBtn { background: #8e44ad; }
+        #fullRefreshBtn:hover { background: #7d3c98; }
+        #rebuildBtn { background: #16a085; }
+        #rebuildBtn:hover { background: #138d75; }
         @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
 
         .tabs-container { background: #fff; border-bottom: 1px solid #ddd; padding: 0 24px; overflow-x: auto; white-space: nowrap; position: sticky; top: 54px; z-index: 99; }
@@ -90,6 +95,8 @@
 
         .loading-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.8); display: flex; align-items: center; justify-content: center; z-index: 1000; font-size: 18px; color: #2c3e50; }
         .loading-overlay.hidden { display: none; }
+        .loading-overlay.error { color: #c0392b; flex-direction: column; gap: 12px; padding: 24px; text-align: center; }
+        .loading-overlay .error-detail { font-size: 14px; color: #555; max-width: 720px; }
 
         th[title] { cursor: help; }
 
@@ -108,7 +115,9 @@
     <h1>Jira Issue Dashboard</h1>
     <div class="header-right">
         <span class="stats" id="statsInfo">Loading...</span>
-        <button id="refreshBtn" onclick="refreshData()">Refresh</button>
+        <button class="toolbar-btn" id="refreshBtn" onclick="refreshData('incremental')">Refresh</button>
+        <button class="toolbar-btn" id="fullRefreshBtn" onclick="refreshData('full')">Full</button>
+        <button class="toolbar-btn" id="rebuildBtn" onclick="refreshData('rebuild')">Rebuild</button>
     </div>
 </div>
 
@@ -128,26 +137,49 @@ let activeTables = {};
 let cardLookup = {};  // key -> {summary, count}
 let currentTab = '汇总';
 
-function refreshData() {
-    const btn = document.getElementById('refreshBtn');
+function refreshData(mode = 'incremental') {
+    const btn = mode === 'full'
+        ? document.getElementById('fullRefreshBtn')
+        : mode === 'rebuild'
+            ? document.getElementById('rebuildBtn')
+            : document.getElementById('refreshBtn');
+    const buttons = document.querySelectorAll('.toolbar-btn');
+    const labels = { incremental: 'Refreshing...', full: 'Full refresh...', rebuild: 'Rebuilding...' };
+    const messages = {
+        incremental: 'Loading changed Jira issues...',
+        full: 'Loading all open Jira issues...',
+        rebuild: 'Rebuilding dashboard from local cache...',
+    };
+    buttons.forEach(b => { b.disabled = true; });
     btn.disabled = true;
-    btn.textContent = 'Refreshing...';
+    btn.textContent = labels[mode] || 'Refreshing...';
     btn.classList.add('loading');
-    fetch('/api/refresh', { method: 'POST' }).then(r => r.json()).then(() => pollStatus());
+    showLoading(messages[mode] || messages.incremental);
+    fetch(`/api/refresh?mode=${encodeURIComponent(mode)}`, { method: 'POST' })
+        .then(r => r.json())
+        .then(() => pollStatus())
+        .catch(err => showError('Failed to start refresh', err.message));
 }
 
 function pollStatus() {
     fetch('/api/status').then(r => r.json()).then(data => {
         if (data.loading) { setTimeout(pollStatus, 2000); return; }
-        const btn = document.getElementById('refreshBtn');
-        btn.disabled = false; btn.textContent = 'Refresh'; btn.classList.remove('loading');
+        resetToolbarButtons();
+        if (data.error) {
+            showError('Failed to load Jira issues', data.error);
+            return;
+        }
         loadData();
-    });
+    }).catch(err => showError('Failed to check refresh status', err.message));
 }
 
 function loadData() {
     fetch('/api/data').then(r => {
-        if (!r.ok) throw new Error('Data not ready');
+        if (!r.ok) {
+            return r.json().catch(() => ({})).then(body => {
+                throw new Error(body.error || 'Data not ready');
+            });
+        }
         return r.json();
     }).then(resp => {
         cachedData = resp.data;
@@ -157,13 +189,44 @@ function loadData() {
             cardLookup[c.key] = { summary: c.summary, count: c.count };
         }
         document.getElementById('statsInfo').textContent =
-            `${cachedData.total} issues | Updated: ${resp.last_updated}`;
+            `${cachedData.total} issues | ${syncSummary(cachedData.sync)} | Updated: ${resp.last_updated}`;
         document.getElementById('loadingOverlay').classList.add('hidden');
         renderTabs();
         // Stay on current tab if it still exists, otherwise fall back to 汇总
         const tabExists = currentTab === '汇总' || cachedData.dates.includes(currentTab);
         switchTab(tabExists ? currentTab : '汇总');
-    }).catch(() => setTimeout(loadData, 2000));
+    }).catch(err => showError('Failed to load Jira issues', err.message));
+}
+
+function showLoading(message) {
+    const overlay = document.getElementById('loadingOverlay');
+    overlay.classList.remove('hidden', 'error');
+    overlay.textContent = message;
+}
+
+function showError(title, detail) {
+    resetToolbarButtons();
+
+    const overlay = document.getElementById('loadingOverlay');
+    overlay.classList.remove('hidden');
+    overlay.classList.add('error');
+    overlay.innerHTML = `<div>${escHtml(title)}</div><div class="error-detail">${escHtml(detail)}</div>`;
+}
+
+function resetToolbarButtons() {
+    document.querySelectorAll('.toolbar-btn').forEach(b => {
+        b.disabled = false;
+        b.classList.remove('loading');
+    });
+    document.getElementById('refreshBtn').textContent = 'Refresh';
+    document.getElementById('fullRefreshBtn').textContent = 'Full';
+    document.getElementById('rebuildBtn').textContent = 'Rebuild';
+}
+
+function syncSummary(sync) {
+    if (!sync) return 'cache';
+    const mode = sync.mode === 'full' ? 'full' : sync.mode === 'rebuild' ? 'cache' : 'incremental';
+    return `${mode}: ${sync.last_changed_count || 0} changed`;
 }
 
 function renderTabs() {

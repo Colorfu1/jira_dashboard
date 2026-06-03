@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 .env
+jira_cache.json
+jira_cache.json.tmp
+*.log
